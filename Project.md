@@ -58,9 +58,9 @@ SNA-Project/
 
 # Define directories
 BACKUP_DIR="/home/user/SNA-Project/backup"
-DATA_DIR="/home/user/SNA-Project/data"
+DATA_DIR="/home/user/SNA-Project/data/"
 
-# Create a timestamped backup
+# Creating a timestamped backup
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
 CHECKSUM_FILE="$BACKUP_DIR/backup_$TIMESTAMP.sha256"
@@ -73,6 +73,7 @@ sha256sum "$BACKUP_FILE" > "$CHECKSUM_FILE"
 
 # Log the backup creation
 echo "$(date): Backup created: $BACKUP_FILE with checksum $CHECKSUM_FILE" >> "$BACKUP_DIR/backup.log"
+
 ```
 
 ---
@@ -81,14 +82,11 @@ echo "$(date): Backup created: $BACKUP_FILE with checksum $CHECKSUM_FILE" >> "$B
 ```bash
 #!/bin/bash
 
-# Define backup directory
+# Directory containing backups
 BACKUP_DIR="/home/user/SNA-Project/backup"
 
-# Retain the 3 most recent backups, delete older ones
-ls -t "$BACKUP_DIR"/*.tar.gz | tail -n +4 | xargs -d '\n' -I {} rm -f {}
-
-# Log the cleanup
-echo "$(date): Deleted older backups, retaining 3 most recent." >> "$BACKUP_DIR/backup.log"
+# Remove all but the three most recent backups
+ls -t "$BACKUP_DIR" | tail -n +8 | xargs -d '\n' -I {} rm -f "$BACKUP_DIR/{}"
 ```
 
 ---
@@ -97,17 +95,52 @@ echo "$(date): Deleted older backups, retaining 3 most recent." >> "$BACKUP_DIR/
 ```bash
 #!/bin/bash
 
-# Define local and remote directories
-BACKUP_DIR="/home/user/SNA-Project/backup"
-REMOTE_USER="server"
-REMOTE_HOST="192.168.1.100"
-REMOTE_DIR="/home/server/SNA-Project/backup"
+# Define directories
+SRC="/home/user/SNA-Project/data"                 # Source directory to back up
+DEST="/home/user/SNA-Project/backup"             # Local backup directory
+DATE=$(date +'%Y-%m-%d_%H-%M-%S')                # Timestamp for filenames
 
-# Sync backups to remote server
-rsync -avz "$BACKUP_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR"
+REMOTE_USER="server"                             # Remote server username
+REMOTE_HOST="192.168.59.141"                     # Remote server IP or hostname
+REMOTE_DEST="/home/server/SNA-Project/backup"    # Remote backup directory
 
-# Log the transfer
-echo "$(date): Backups synced to remote server $REMOTE_HOST" >> "$BACKUP_DIR/backup.log"
+# Ensure the local backup directory exists
+mkdir -p "$DEST"
+
+# Step 1: Create a compressed archive
+BACKUP_FILE="$DEST/backup_$DATE.tar.gz"
+tar -czf "$BACKUP_FILE" "$SRC"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to create the backup archive."
+    exit 1
+fi
+
+# Step 2: Generate a checksum for the archive
+CHECKSUM_FILE="$BACKUP_FILE.sha256"
+sha256sum "$BACKUP_FILE" > "$CHECKSUM_FILE"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to generate checksum."
+    exit 1
+fi
+
+# Step 3: Sync the backup and checksum to the remote machine
+rsync -avz "$BACKUP_FILE" "$CHECKSUM_FILE" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DEST"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to sync the backup to the remote machine."
+    exit 1
+fi
+
+# Step 4: Log backup completion
+echo "Backup completed and synced on $(date)" >> "$DEST/backup.log"
+
+# Step 5: Delete the compressed file and checksum locally
+rm "$BACKUP_FILE" "$CHECKSUM_FILE"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to delete local backup files."
+    exit 1
+fi
+
+echo "Backup and checksum process completed successfully."
 ```
 
 ---
@@ -116,18 +149,65 @@ echo "$(date): Backups synced to remote server $REMOTE_HOST" >> "$BACKUP_DIR/bac
 ```bash
 #!/bin/bash
 
-# Define local and remote directories
-RESTORED_DIR="/home/user/SNA-Project/restored_data"
-REMOTE_USER="server"
-REMOTE_HOST="192.168.1.100"
-REMOTE_DIR="/home/server/SNA-Project/backup"
+# Define directories
+RESTORE_DIR="/home/user/SNA-Project/restored_data"      # Local restore directory
+REMOTE_USER="server"                    # Remote server user
+REMOTE_HOST="192.168.59.141"                    # Remote server host (IP or domain)
+REMOTE_DEST="/home/server/SNA-Project/backup"                 # Remote backup directory
 
-# Fetch the latest backup from remote server
-LATEST_BACKUP=$(ssh "$REMOTE_USER@$REMOTE_HOST" "ls -t $REMOTE_DIR | head -n 1")
-scp "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR/$LATEST_BACKUP" "$RESTORED_DIR/"
+# Check if the user provided a backup file as an argument
+if [ $# -ne 1 ]; then
+    # If no argument was provided, show an error message and exit
+    echo "Usage: $0 <backup_file>"
+    exit 1
+fi
 
-# Log the restore operation
-echo "$(date): Restored backup $LATEST_BACKUP from remote server $REMOTE_HOST" >> "$RESTORED_DIR/restore.log"
+# Store the backup file path from the argument provided by the user
+BACKUP_FILE="$1"
+
+# Generate the corresponding checksum file name based on the backup file name
+CHECKSUM_FILE="$REMOTE_DEST/$(basename "$BACKUP_FILE" .tar.gz).sha256"
+
+# Step 1: Verify that the backup file exists on the remote server
+echo "Checking if the backup file exists on remote server..."
+
+ssh $REMOTE_USER@$REMOTE_HOST "[ -f $REMOTE_DEST/$(basename "$BACKUP_FILE") ]"
+if [ $? -ne 0 ]; then
+    # If the backup file doesn't exist on the remote server, show an error message and exit
+    echo "Backup file does not exist on remote server: $BACKUP_FILE"
+    exit 1
+fi
+
+# Step 2: Check if the checksum file exists on the remote server
+echo "Checking if checksum file exists on remote server..."
+ssh $REMOTE_USER@$REMOTE_HOST "[ -f $CHECKSUM_FILE ]"
+if [ $? -eq 0 ]; then
+    # If the checksum file exists, verify it
+    echo "Verifying checksum for $BACKUP_FILE on remote server..."
+
+    ssh $REMOTE_USER@$REMOTE_HOST "sha256sum -c $CHECKSUM_FILE" > /dev/null
+    if [ $? -ne 0 ]; then
+        # If the checksum verification fails, show an error message and exit
+        echo "Checksum verification failed on remote server! The backup may be corrupted."
+        exit 1
+    fi
+else
+    # If the checksum file doesn't exist, skip the verification
+    echo "Checksum file does not exist on remote server. Skipping checksum verification."
+fi
+
+# Step 3: Create restore directory if it doesn't exist
+mkdir -p $RESTORE_DIR
+
+# Step 4: Fetch the backup from the remote machine
+rsync -avz $REMOTE_USER@$REMOTE_HOST:$REMOTE_DEST/$(basename "$BACKUP_FILE") $RESTORE_DIR
+
+# Step 5: Extract the backup
+tar -xzvf $RESTORE_DIR/$(basename "$BACKUP_FILE") -C $RESTORE_DIR
+
+# Step 6: Delete the compressed file
+rm $RESTORE_DIR/$(basename "$BACKUP_FILE")
+
 ```
 
 ---
@@ -136,48 +216,55 @@ echo "$(date): Restored backup $LATEST_BACKUP from remote server $REMOTE_HOST" >
 ```bash
 #!/bin/bash
 
-# Define directories
-BACKUP_DIR="/home/user/SNA-Project/backup"
-DATA_DIR="/home/user/SNA-Project/data"
+# Define directories for backup and data storage
+BACKUP_DIR="/home/user/SNA-Project/backup"  # Where backups are stored
+DATA_DIR="/home/user/SNA-Project/restored_data"      # Where the data is restored to
 
-# Check if the backup file and checksum file are provided as arguments
+# Check if the user provided a backup file as an argument
 if [ $# -ne 1 ]; then
+    # If no argument was provided, show an error message and exit
     echo "Usage: $0 <backup_file>"
     exit 1
 fi
 
+# Store the backup file path from the argument provided by the user
 BACKUP_FILE="$1"
+
+# Generate the corresponding checksum file name based on the backup file name
 CHECKSUM_FILE="$BACKUP_DIR/$(basename "$BACKUP_FILE" .tar.gz).sha256"
 
 # Check if the backup file exists
 if [ ! -f "$BACKUP_FILE" ]; then
+    # If the backup file doesn't exist, show an error message and exit
     echo "Backup file does not exist: $BACKUP_FILE"
     exit 1
 fi
 
 # Check if the checksum file exists
 if [ ! -f "$CHECKSUM_FILE" ]; then
+    # If the checksum file doesn't exist, show an error message and exit
     echo "Checksum file does not exist: $CHECKSUM_FILE"
     exit 1
 fi
 
-# Verify the checksum
+# Verify that the backup file's checksum matches the stored checksum
 echo "Verifying checksum for $BACKUP_FILE..."
-sha256sum -c "$CHECKSUM_FILE" --quiet
+sha256sum -c "$CHECKSUM_FILE"  # Check the checksum quietly (no output)
 if [ $? -ne 0 ]; then
+    # If the checksum verification fails, show an error message and exit
     echo "Checksum verification failed! The backup may be corrupted."
     exit 1
 fi
 
-# Extract the backup
+# If the checksum is verified, restore the backup (extract it)
 echo "Restoring backup from $BACKUP_FILE..."
-tar -xzf "$BACKUP_FILE" -C "$DATA_DIR"
+tar -xzf "$BACKUP_FILE" -C "$DATA_DIR"  # Extract the backup file to the DATA_DIR
 
-# Log the restoration
+# Log the restoration event to a backup log file with the current date and time
 echo "$(date): Backup restored: $BACKUP_FILE" >> "$BACKUP_DIR/backup.log"
 
+# Print a message to indicate that the restore is complete
 echo "Restore completed successfully."
-
 ```
 
 ---
@@ -190,7 +277,7 @@ echo "Restore completed successfully."
 BACKUP_DIR="/home/server/SNA-Project/backup"
 
 # Retain the 3 most recent backups, delete older ones
-ls -t "$BACKUP_DIR"/*.tar.gz | tail -n +4 | xargs -d '\n' -I {} rm -f {}
+ls -t "$BACKUP_DIR"/*.tar.gz | tail -n +5 | xargs -d '\n' -I {} rm -f {}
 
 # Log the cleanup
 echo "$(date): Deleted older backups, retaining 3 most recent on remote server." >> "$BACKUP_DIR/backup.log"
