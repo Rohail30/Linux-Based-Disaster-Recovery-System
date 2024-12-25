@@ -56,32 +56,23 @@ SNA-Project/
 ```bash
 #!/bin/bash
 
-# Directories
-RESTORE_DIR="/home/user/SNA-Project/restored_data"  # Directory to restore data
-BACKUP_FILE="$1"                                   # Backup file to restore
-CHECKSUM_FILE="${BACKUP_FILE}.sha256"              # Corresponding checksum file
+# Define directories
+BACKUP_DIR="/home/user/SNA-Project/backup"
+DATA_DIR="/home/user/SNA-Project/data"
 
-# Ensure the backup file and checksum file exist
-if [ ! -f "$BACKUP_FILE" ] || [ ! -f "$CHECKSUM_FILE" ]; then
-    echo "Error: Backup file or checksum file missing."
-    exit 1
-fi
+# Create a timestamped backup
+TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+CHECKSUM_FILE="$BACKUP_DIR/backup_$TIMESTAMP.sha256"
 
-# Validate the backup file
-if ! sha256sum -c "$CHECKSUM_FILE"; then
-    echo "Error: Checksum validation failed."
-    exit 1
-fi
+# Create backup
+tar -czf "$BACKUP_FILE" -C "$DATA_DIR" .
 
-# Create the restore directory if it doesn't exist
-mkdir -p "$RESTORE_DIR"
+# Generate checksum for the backup
+sha256sum "$BACKUP_FILE" > "$CHECKSUM_FILE"
 
-# Extract the backup
-tar -xzf "$BACKUP_FILE" -C "$RESTORE_DIR"
-
-# Completion message
-echo "Backup restored successfully to $RESTORE_DIR."
-
+# Log the backup creation
+echo "$(date): Backup created: $BACKUP_FILE with checksum $CHECKSUM_FILE" >> "$BACKUP_DIR/backup.log"
 ```
 
 ---
