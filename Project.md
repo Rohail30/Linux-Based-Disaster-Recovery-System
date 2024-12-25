@@ -1,5 +1,180 @@
+# Linux-Based-Disaster-Recovery-System
 
-#### 1. Check if SSH Is Installed
+## Project Introduction
+This Project is a comprehensive and automated solution designed to simplify and secure the management of backup and restoration processes for critical data. This project ensures data integrity, efficient storage utilization, and seamless recovery mechanisms. It is structured into distinct components that work together to automate backups, manage retention policies, and facilitate both local and remote restoration of data.
+
+### 1. Project requirements
+
+#### Tools and Technologies
+
+1. **Shell Scripting** - For automating backup, cleanup, and restoration processes.  
+2. **`tar`** - Used for archiving files into a single package.  
+3. **`gzip`** - Compresses backup files to save storage space.  
+4. **`rsync`** - Facilitates secure and efficient file transfers, especially for remote backups.  
+5. **`scp`** - Provides a simple method for secure file transfer to remote servers.  
+6. **`sha256sum`** - Ensures data integrity by generating and verifying file checksums.  
+7. **Cron Jobs** - Schedules automated tasks for backup creation and cleanup.  
+8. **Linux Command Line Utilities** - For file and directory management (`ls`, `rm`, etc.).
+9. **Virtual Machines (VMs)** - Two VMs are used for simulating local and remote environments, ensuring robust testing of backup and restoration processes.
+
+#### Project Directory Structure of Local Machine
+
+```
+SNA-Project/
+├── backup/           # Stores backup files and logs
+│   ├── backup_<timestamp>.tar.gz
+│   ├── backup.log
+├── data/             # Contains source data to be backed up
+│   ├── 2012362/
+│   ├── 2112242/
+├── restored_data/    # Stores restored backup files
+│   ├── backup_<timestamp>.tar.gz
+│   ├── home/
+├── scripts/          # Automation scripts for backup and restore
+    ├── backup.sh          # Creates backups
+    ├── delete-backup.sh   # Removes older backups
+    ├── remote-backup.sh   # Transfers backups to a remote server
+    ├── remote-restore.sh  # Restores backups from a remote server
+    ├── restore.sh         # Restores local backups
+
+```
+
+#### Project Directory Structure of Remote Machine
+
+```
+SNA-Project/
+├── backup/           # Stores backup files
+│   ├── backup_<timestamp>.tar.gz
+├── scripts/          # Automation scripts for cleanup
+    ├── delete.sh          # Deletes older backups
+```
+
+
+#### Scripts Used in This Project
+
+### **1. `backup.sh`**
+```bash
+#!/bin/bash
+
+# Define directories
+BACKUP_DIR="/home/user/SNA-Project/backup"
+DATA_DIR="/home/user/SNA-Project/data"
+
+# Create a timestamped backup
+TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+
+# Create backup
+tar -czf "$BACKUP_FILE" -C "$DATA_DIR" .
+
+# Log the backup creation
+echo "Backup created: $BACKUP_FILE" >> "$BACKUP_DIR/backup.log"
+```
+
+---
+
+### **2. `delete-backup.sh`**
+```bash
+#!/bin/bash
+
+# Define backup directory
+BACKUP_DIR="/home/user/SNA-Project/backup"
+
+# Retain the 3 most recent backups, delete older ones
+ls -t "$BACKUP_DIR"/*.tar.gz | tail -n +4 | xargs -d '\n' -I {} rm -f {}
+
+# Log the cleanup
+echo "$(date): Deleted older backups, retaining 3 most recent." >> "$BACKUP_DIR/backup.log"
+```
+
+---
+
+### **3. `remote-backup.sh`**
+```bash
+#!/bin/bash
+
+# Define local and remote directories
+BACKUP_DIR="/home/user/SNA-Project/backup"
+REMOTE_USER="server"
+REMOTE_HOST="192.168.1.100"
+REMOTE_DIR="/home/server/SNA-Project/backup"
+
+# Sync backups to remote server
+rsync -avz "$BACKUP_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR"
+
+# Log the transfer
+echo "$(date): Backups synced to remote server $REMOTE_HOST" >> "$BACKUP_DIR/backup.log"
+```
+
+---
+
+### **4. `remote-restore.sh`**
+```bash
+#!/bin/bash
+
+# Define local and remote directories
+RESTORED_DIR="/home/user/SNA-Project/restored_data"
+REMOTE_USER="server"
+REMOTE_HOST="192.168.1.100"
+REMOTE_DIR="/home/server/SNA-Project/backup"
+
+# Fetch the latest backup from remote server
+LATEST_BACKUP=$(ssh "$REMOTE_USER@$REMOTE_HOST" "ls -t $REMOTE_DIR | head -n 1")
+scp "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR/$LATEST_BACKUP" "$RESTORED_DIR/"
+
+# Log the restore operation
+echo "$(date): Restored backup $LATEST_BACKUP from remote server $REMOTE_HOST" >> "$RESTORED_DIR/restore.log"
+```
+
+---
+
+### **5. `restore.sh`**
+```bash
+#!/bin/bash
+
+# Define directories
+BACKUP_DIR="/home/user/SNA-Project/backup"
+RESTORED_DIR="/home/user/SNA-Project/restored_data"
+
+# Find the latest backup
+LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/*.tar.gz | head -n 1)
+
+# Restore the latest backup
+tar -xzf "$LATEST_BACKUP" -C "$RESTORED_DIR"
+
+# Log the restoration
+echo "$(date): Restored backup $LATEST_BACKUP to $RESTORED_DIR" >> "$RESTORED_DIR/restore.log"
+```
+
+---
+
+### **6. `delete.sh` (on Remote Server)**
+```bash
+#!/bin/bash
+
+# Define backup directory on remote server
+BACKUP_DIR="/home/server/SNA-Project/backup"
+
+# Retain the 3 most recent backups, delete older ones
+ls -t "$BACKUP_DIR"/*.tar.gz | tail -n +4 | xargs -d '\n' -I {} rm -f {}
+
+# Log the cleanup
+echo "$(date): Deleted older backups, retaining 3 most recent on remote server." >> "$BACKUP_DIR/backup.log"
+```
+
+---
+
+### **How These Scripts Work Together**
+1. **`backup.sh`**: Creates local backups.
+2. **`delete-backup.sh`**: Deletes older local backups.
+3. **`remote-backup.sh`**: Syncs backups to the remote server.
+4. **`delete.sh`**: Manages remote server backup retention.
+5. **`restore.sh`**: Restores backups locally.
+6. **`remote-restore.sh`**: Fetches and restores backups from the remote server.
+
+## 2. Connect to Server
+
+#### Check if SSH is installed
 On both VM A and VM B:
 ```bash
 sudo systemctl status sshd
@@ -10,14 +185,14 @@ sudo systemctl status sshd
   sudo yum install -y openssh-server
   ```
 
-#### 2. Start and Enable SSH Service
+#### Start and Enable SSH Service
 On both VMs:
 ```bash
 sudo systemctl start sshd
 sudo systemctl enable sshd
 ```
 
-#### 3. Allow SSH Through the Firewall
+#### Allow SSH Through the Firewall
 If the firewall is running, allow SSH traffic on both VMs:
 ```bash
 sudo firewall-cmd --add-service=ssh --permanent
@@ -63,37 +238,3 @@ To run your backup script in `crontab` without being prompted for a password, yo
      ```bash
      ssh server@192.168.59.134
      ```
-
----
-
-### **Add the Script to Crontab**
-Once passwordless SSH is configured, you can safely run your script via `crontab`.
-
-1. Open the crontab editor:
-   ```bash
-   crontab -e
-   ```
-
-2. Add an entry to run your script at the desired time. For example, to run the script daily at 2 AM:
-   ```bash
-   0 2 * * * /path/to/your/backup_script.sh
-   ```
-
-3. Save and exit the editor.
-
----
-
-### **Verify Crontab Execution**
-1. Check the `cron` log to ensure the script runs as scheduled:
-   ```bash
-   grep CRON /var/log/syslog
-   ```
-
-2. Check your `backup.log` file for successful backups:
-   ```bash
-   cat /home/user/SNA-Project/backup/backup.log
-   ```
-
----
-
-By setting up passwordless SSH, your script will execute seamlessly in `crontab` without requiring manual password entry.
