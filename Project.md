@@ -56,19 +56,32 @@ SNA-Project/
 ```bash
 #!/bin/bash
 
-# Define directories
-BACKUP_DIR="/home/user/SNA-Project/backup"
-DATA_DIR="/home/user/SNA-Project/data"
+# Directories
+RESTORE_DIR="/home/user/SNA-Project/restored_data"  # Directory to restore data
+BACKUP_FILE="$1"                                   # Backup file to restore
+CHECKSUM_FILE="${BACKUP_FILE}.sha256"              # Corresponding checksum file
 
-# Create a timestamped backup
-TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+# Ensure the backup file and checksum file exist
+if [ ! -f "$BACKUP_FILE" ] || [ ! -f "$CHECKSUM_FILE" ]; then
+    echo "Error: Backup file or checksum file missing."
+    exit 1
+fi
 
-# Create backup
-tar -czf "$BACKUP_FILE" -C "$DATA_DIR" .
+# Validate the backup file
+if ! sha256sum -c "$CHECKSUM_FILE"; then
+    echo "Error: Checksum validation failed."
+    exit 1
+fi
 
-# Log the backup creation
-echo "Backup created: $BACKUP_FILE" >> "$BACKUP_DIR/backup.log"
+# Create the restore directory if it doesn't exist
+mkdir -p "$RESTORE_DIR"
+
+# Extract the backup
+tar -xzf "$BACKUP_FILE" -C "$RESTORE_DIR"
+
+# Completion message
+echo "Backup restored successfully to $RESTORE_DIR."
+
 ```
 
 ---
@@ -134,16 +147,46 @@ echo "$(date): Restored backup $LATEST_BACKUP from remote server $REMOTE_HOST" >
 
 # Define directories
 BACKUP_DIR="/home/user/SNA-Project/backup"
-RESTORED_DIR="/home/user/SNA-Project/restored_data"
+DATA_DIR="/home/user/SNA-Project/data"
 
-# Find the latest backup
-LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/*.tar.gz | head -n 1)
+# Check if the backup file and checksum file are provided as arguments
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <backup_file>"
+    exit 1
+fi
 
-# Restore the latest backup
-tar -xzf "$LATEST_BACKUP" -C "$RESTORED_DIR"
+BACKUP_FILE="$1"
+CHECKSUM_FILE="$BACKUP_DIR/$(basename "$BACKUP_FILE" .tar.gz).sha256"
+
+# Check if the backup file exists
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "Backup file does not exist: $BACKUP_FILE"
+    exit 1
+fi
+
+# Check if the checksum file exists
+if [ ! -f "$CHECKSUM_FILE" ]; then
+    echo "Checksum file does not exist: $CHECKSUM_FILE"
+    exit 1
+fi
+
+# Verify the checksum
+echo "Verifying checksum for $BACKUP_FILE..."
+sha256sum -c "$CHECKSUM_FILE" --quiet
+if [ $? -ne 0 ]; then
+    echo "Checksum verification failed! The backup may be corrupted."
+    exit 1
+fi
+
+# Extract the backup
+echo "Restoring backup from $BACKUP_FILE..."
+tar -xzf "$BACKUP_FILE" -C "$DATA_DIR"
 
 # Log the restoration
-echo "$(date): Restored backup $LATEST_BACKUP to $RESTORED_DIR" >> "$RESTORED_DIR/restore.log"
+echo "$(date): Backup restored: $BACKUP_FILE" >> "$BACKUP_DIR/backup.log"
+
+echo "Restore completed successfully."
+
 ```
 
 ---
