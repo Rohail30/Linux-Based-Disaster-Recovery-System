@@ -88,4 +88,4 @@ The disaster recovery system you create will:
 - Practical experience with automation and scheduling tools.
 - Problem-solving skills when testing disaster scenarios.
 
-This project is practical, beginner-friendly, and showcases essential skills in **System Administration and Data Management**!
+
